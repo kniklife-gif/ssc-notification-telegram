@@ -1,0 +1,53 @@
+name: SSC Notification Monitor
+
+on:
+  # Schedule is intentionally disabled: sources/ssc.py cannot yet fetch real SSC
+  # data, so scheduled runs would fail every time. After the SSC listing request
+  # is verified and a manual run succeeds, uncomment these two lines:
+  # schedule:
+  #   - cron: "*/30 * * * *"   # every 30 minutes (UTC)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ssc-monitor
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install requirements
+        run: pip install -r requirements.txt
+
+      - name: Run monitor
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python monitor.py
+
+      # Runs even if the monitor step failed, so alerts already delivered in a
+      # partially failed run are still recorded in state.
+      - name: Commit state
+        if: always()
+        run: |
+          if git diff --quiet -- state/seen.json; then
+            echo "No state changes"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add state/seen.json
+          git commit -m "Update SSC notification state"
+          git push
